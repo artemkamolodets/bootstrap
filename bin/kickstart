@@ -1,20 +1,6 @@
 #!/usr/bin/env bash
-#
-# Running:
-#
-# What shold can be do:
-# - Request/check root
-# - Показать текущие настройки
-# - Показать какие опции запуска есть
-# - Запросить какой использовать домен для установки
-# - 
-# - 
-# - Клонировать/обновить репозиторий
-# - 
-# - 
-# - 
 
-VERSION=1.1.1
+VERSION=3.1.5
 PLATFORM_HOME=/srv/platform
 BOOTSTRAP_BRANCH=master
 BOOTSTRAP_REPO=https://github.com/rockstat/bootstrap.git
@@ -30,11 +16,11 @@ FACT_CONF=/etc/ansible/facts.d/config.fact
 
 # state vars
 DOMAIN=""
-NAME=""
+USERNAME=""
 EMAIL=""
 ADMIN_PASSWORD=""
-HOSTALIAS=""
 DEF_HOSTALIAS="rstat"
+HOSTALIAS="$DEF_HOSTALIAS"
 INSTALLED=""
 
 # setup state vars
@@ -44,22 +30,6 @@ ROLES_UPDATED=0
 set +H
 # Any subsequent(*) commands which fail will cause the shell script to exit immediately
 set -e
-
-
-################################################################################
-# Args
-################################################################################
-
-for i in "$@"; do
-  case $i in
-      # -p=*|--prefix=*)
-      # -s=*|--searchpath=*) SEARCHPATH="${i#*=}" ;;
-      # -l=*|--lib=*) DIR="${i#*=}" ;;
-      # --skip-setup*) SKIP_SETUP=YES ;;
-      # --no-update*) UPDATE_SOURCE=NO ;;
-      *) ;;  # unknown option
-  esac
-done
 
 ################################################################################
 # 2. Library
@@ -206,6 +176,10 @@ setup_playbook() {
 # "LOCAL_MOUNT" "Allow mounting of local devices" OFF \
 # "REMOTE_MOUNT" "Allow mounting of remote devices" OFF
 
+show_dialog(){
+  whiptail --title "$1" --msgbox "$2" 8 78
+}
+
 whiptailInput() {
     eval local init="\$$1"
     case "$1" in
@@ -224,40 +198,42 @@ whiptailInput() {
               if [[ -n ${value// } ]]; then
                 enc=$(openssl passwd -apr1 ${value})
                 eval $1="'$enc'"
+                save_config
               fi
             fi
           fi
         fi
       else
-        eval $1="$value"
+        eval $1="'$value'"
+        save_config
       fi
     fi
 }
 
 request_domain(){
-  whiptailInput "DOMAIN" "Domain" "Please enter domain for your tracker" 8 78
-  save_config
+  whiptailInput "DOMAIN" "Domain" "Please enter domain for your tracker." 8 78
 }
 
 request_hostalias(){
-  whiptailInput "HOSTALIAS" "Short hostname" "Please enter short hostname for server" 8 78
-  save_config
+  whiptailInput "HOSTALIAS" "Short hostname" "Shot server hostname that you can see at command line prompt." 8 78
 }
 
 request_email(){
-  whiptailInput "EMAIL" "Email" "Please enter your email to receive ssl notifitation" 8 78
-  save_config
+  whiptailInput "EMAIL" "Email" "Email required for issuing letsencrypt SSL and GIT." 8 78
+}
+
+request_username(){
+  whiptailInput "USERNAME" "User name" "Provide your first and last name. Will be used in git configuration." 8 78
 }
 
 request_password(){
-  whiptailInput "ADMIN_PASSWORD" "Admin password" "Please type sectet password for admin user" 8 78
-  save_config
+  whiptailInput "ADMIN_PASSWORD" "Admin password" "Provide secret password for admin user." 8 78
 }
 
-request_users(){
-  whiptailInput "USERS" "Users list" "Recorn should be valid json array" 8 78
-  save_config
+update_reboot_dialog(){
+  show_dialog "System upgrade" "After upgrade complete server will be rebooted and you need to connect agant to continue."
 }
+
 
 ################################################################################
 ## Actions
@@ -286,6 +262,7 @@ load_config(){
     DOMAIN=$(awk -F "=" '/domain/ {print $2}' $FACT_CONF)
     EMAIL=$(awk -F "=" '/email/ {print $2}' $FACT_CONF)
     ADMIN_PASSWORD=$(awk -F "=" '/admin_password/ {print $2}' $FACT_CONF)
+    USERNAME=$(awk -F "=" '/username/ {print $2}' $FACT_CONF)
     HOSTALIAS=$(awk -F "=" '/hostalias/ {print $2}' $FACT_CONF)
     if [[ -z "$HOSTALIAS" ]]; then HOSTALIAS=$DEF_HOSTALIAS; fi
   fi
@@ -303,13 +280,14 @@ ${HOSTALIAS}
 }
 
 save_config(){
-  mkdir -p $(dirname $FACT_CONF)
   save_inventory
+  mkdir -p $(dirname $FACT_CONF)
   echo """[general]
 domain=${DOMAIN}
 email=${EMAIL}
 admin_password=${ADMIN_PASSWORD}
 hostalias=${HOSTALIAS}
+username=${USERNAME}
 installed=${INSTALLED}""" > $FACT_CONF
 }
 
@@ -340,9 +318,13 @@ initialize(){
   done
   while [ -z ${ADMIN_PASSWORD// } ]; do request_password
   done
+  while [ -z ${USERNAME// } ]; do request_username
+  done
+  while [ -z ${HOSTALIAS// } ]; do request_hostalias
+  done
 }
 
-if [[ -a "$FACT_CONF" && ! -z $(which python3)  ]]; then
+if [[ -a "$FACT_CONF" ]]; then
   print_status "Reading local configuration"
   load_config
 fi
@@ -367,16 +349,17 @@ HEREDOC
 
 menu() {
   # --menu <text> <height> <width> <listheight>
-  OPTION=$(whiptail --title "Rockstat Shell Script Menu" --menu "${MENU_TEXT}" 25 60 10 \
+  OPTION=$(whiptail --title "Rockstat Shell Script Menu" --menu "${MENU_TEXT}" 30 60 14 \
   "1"  "    Upgrade OS" \
-  "2"  "    Request SSL certificate" \
-  "3"  "    Install/upgrade server and platform" \
+  "2"  "    Issue SSL certificate" \
+  "3"  "    Install/upgrade system and platform" \
   "4"  "    Upgrade only platform components" \
   "11" "    Change Admin Password" \
   "12" "    Change Domain '${DOMAIN}'" \
   "13" "    Change Short hostname '${HOSTALIAS}'" \
   "14" "    Change Email '${EMAIL}'" \
-  "14" "    Apply new admin password" \
+  "15" "    Change Name '${USERNAME}'" \
+  "20" "    Apply new admin password" \
   "0"  "    Exit"  3>&1 1>&2 2>&3)
   EXITCODE=$?
   [[ "$EXITCODE" = 1 ]] && break;
@@ -384,7 +367,7 @@ menu() {
   # echo "exitcode: $EXITCODE"
 
   case "$OPTION" in
-    "1") run_upgrade_playbook ;;
+    "1") update_reboot_dialog; run_upgrade_playbook ;;
     "2") run_platform_playbook ssl ;;
     "3") run_platform_playbook full_setup ;;
     "4") run_platform_playbook pservice,ppart ;;
@@ -392,7 +375,8 @@ menu() {
     "12") request_domain ;;
     "13") request_hostalias ;;
     "14") request_email ;;
-    "14") run_platform_playbook nginx ;;
+    "15") request_username ;;
+    "20") run_platform_playbook nginx ;;
     "0") exit 1 ;;
     *) echo "Unknown action '${OPTION}'" ;;	
   esac

@@ -41,28 +41,16 @@ _nginx_proto_upgrade:
         default upgrade;
         ''      close;
     }
-
-# ########## Grafana ##########
-grafana_plugins:
-  - grafana-clock-panel
-  - grafana-simple-json-datasource
-  - vertamedia-clickhouse-datasource
-  - grafana-piechart-panel
-  - petrslavotinek-carpetplot-panel
-  - jdbranham-diagram-panel
-  - raintank-worldping-app
-  - ryantxu-ajax-panel
-  - natel-discrete-panel
-# use this variable in your private config
-# grafana_plugins_custom:
-  # - plugin that i want
-
-# ########## Other things ##########
-
-hostname: "{{inventory_hostname_short|default(inventory_hostname)}}"
-
-# ########## Mailer config ##########
-mailer_subj_key: "Ваши ключи OpenVPN ({{ domain }}) v{{ playbook_version }}"
-mailer_subj_snip: "Сниппет для сайта ({{ domain }}) v{{ playbook_version }}"
-
-
+_nginx_cors_options:
+  - if ($request_method = OPTIONS) {
+      add_header 'Content-Length' 0;
+      add_header 'Content-Type' 'text/plain; charset=utf-8';
+      add_header 'Access-Control-Allow-Origin' "$http_origin";
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+      add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept';
+      return 204;
+    }
+_nginx_cors_base:
+  - add_header 'Access-Control-Allow-Origin' "$http_origin"
+  - add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS'
+  - add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept'
