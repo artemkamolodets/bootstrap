@@ -1,14 +1,9 @@
-playbook_version: 3.1.7
+playbook_version: 3.2.0
 
-# ########## Main params ##########
-#version
-branch: HEAD
-dock_no_cache: no
-#local config
+# ########## local config ##########
 _local_config: "{{(ansible_local.config|default({})).general|default({})}}"
-#params
+# ########## Features ##########
 log_level: info
-#features
 setup_server: yes
 setup_nginx: yes
 _setup_ssl: yes
@@ -16,20 +11,32 @@ _setup_ssl_wildcard: no
 setup_jupyter: yes
 setup_theia: yes
 metrics_server: no
-#services
+# ########## Creds ##########
+person_name: Aldous Huxley
+contact_email: alex@ebalrefuckanal.de
+#sysuser
+rsys_creds: [ "rsys", "" ]
+ruser_creds: [ "ruser", "" ]
+#main user. (temp)
+main_user: default
+main_user_password: default
+#system users
+support_user: 'x011'
+remote_user: 'x011'
+#key for update manager to access server
+support_key_file: './public_keys/support.pub'
+support_key: "{{ lookup('file', support_key_file) }}"
+# ########## AcmeDSN ##########
 _acmedns_endpoint: auth.0x011.xyz
 _acmedns_setup: no
-#repos
+# ########## Repos ##########
 git_account: https://github.com/rockstat
 repos:
   band_set: "{{git_account}}/band-services-set"
   dashboard: "{{git_account}}/dashboard.git"
   theia: "{{git_account}}/theia-ide-image.git"
   splash: "{{git_account}}/splash.git"
-#base
-person_name: Aldous Huxley
-contact_email: alex@ebalrefuckanal.de
-#domains
+# ########## Domains ##########
 domain: "{{tracker_domain|default(ansible_host)}}"
 domains:
   app: 'app.{{domain}}'
@@ -39,6 +46,20 @@ domains:
   theia: 'theia.{{domain}}'
   netdata: 'netdata.{{domain}}'
   httpdebug: 'httpdebug.{{domain}}'
+# ########## Images ##########
+images_default:
+  chproxy: rockstat/chproxy
+  redis: redis:4-alpine
+  logspout: gliderlabs/logspout
+  anaconda: continuumio/anaconda3
+  grafana: rockstat/grafana
+  band: rockstat/band-base-py
+  director: rockstat/director
+  theia: rockstat/theia-ide
+  front: rockstat/front
+  chwriter: rockstat/chwriter
+  heavyload: rockstat/heavyload
+images: "{{images_default|combine(images_custom|default({}))}}"
 # ########## Logs ##########
 #loggly
 _loggly_hostname: logs-01.loggly...
@@ -54,6 +75,7 @@ _ssl_certs:
   - domain: "{{domain}}"
     wildcard: yes
     email: "{{contact_email}}"
+# domains for regular reques
 domains_ssl:
   - email: '{{contact_email}}'
     domains: "{{[domain] + domains.values()|list|unique}}"
@@ -61,22 +83,12 @@ _ssl_cert_dir: "/etc/letsencrypt/live"
 _ssl_cert_fullchain: fullchain.pem
 _ssl_cert_trust: chain.pem
 _ssl_cert_key: privkey.pem
-# ########## Users ##########
-#main user. (temp)
-main_user: default
-main_user_password: default
-#system users
-support_user: 'x011'
-remote_user: 'x011'
-#key for update manager to access server
-support_key_file: './public_keys/support.pub'
-support_key: "{{ lookup('file', support_key_file) }}"
-#dirs
+# ########## dirs ##########
 home_dir: '/srv/platform'
 data_dir: '{{home_dir}}/data'
+etc_dir: '{{home_dir}}/etc'
 build_dir: '{{home_dir}}/build'
 images_dir: "{{home_dir}}/images"
-important_dirs: ["{{images_dir}}", "{{build_dir}}", "{{data_dir}}"]
 dirs:
   front_custom_config: "{{data_dir}}/front_custom_config"
   chwriter_custom_config: "{{data_dir}}/chwriter_custom_config"
@@ -98,8 +110,10 @@ dirs:
   certificates: "{{_ssl_cert_dir}}"
   clickhouse: "/srv/clickhouse"
   clickhouse_tmp: "/srv/clickhouse_tmp"
+  clickhouse_log: "/var/log/clickhouse-server"
   redis: "/srv/redis"
-#ports directory
+important_dirs: ["{{images_dir}}", "{{build_dir}}", "{{data_dir}}", "{{etc_dir}}"]
+# ########## ports ##########
 ports:
   # services
   director: [10000, 8080]
@@ -155,18 +169,14 @@ s2s_vpn_host_ip: "{{s2s_vpn_net|net_gw}}"
 # ########## Interfaces ##########
 if_outer: "{{ansible_default_ipv4.address}}"
 if_inner: "{{docker_host_ip}}"
+local_nets: [ "127.0.0.0/8", "{{s2s_vpn_net}}", "{{docker_net}}" ]
 # ########## Firewall ##########
 disable_ipv6: true
-firewall_rules_base:
+firewall_rules:
   - { from_ip: '{{docker_net}}'}
   - { to_port: '{{ports.http.0}}'}
   - { to_port: '{{ports.https.0}}'}
   - { to_port: '{{ports.openvpn.0}}'}
-firewall_rules_acmedns:
-  - { to_port: "53", proto: 'udp'}
-  - { to_port: "19943" }
-  - { to_port: "19980" }
-firewall_rules: "{{firewall_rules_base + _acmedns_setup|ternary(firewall_rules_acmedns, [])}}"
 # ########## Jupyter/anaconda packages ##########
 # default
 jup_with_conda_def: ["ujson"]
@@ -175,10 +185,42 @@ jup_with_pip_def: ["prodict", "arrow", "simplech", "asimplech"]
 jup_with_conda: [""]
 jup_with_pip: [""]
 # todo: ability to specify additional packages for theia and others
-# ########## ClickHouse ##########
+# ########## ClickHouse ##########  
+_clickhouse_profiles_custom:
+  sys_prof: { max_memory_usage: 3000000000, use_uncompressed_cache: 0, load_balancing: random } 
+  user_prof: { max_memory_usage: 2000000000, use_uncompressed_cache: 0, load_balancing: random }
+_clickhouse_users_custom:
+  - { name: "{{rsys_creds.0}}", password: "{{rsys_creds.1}}", networks: "{{ local_nets }}", profile: "sys_prof", quota: "default" }
+  - { name: "{{ruser_creds.0}}", password: "{{ruser_creds.1}}", networks: "{{ local_nets }}", profile: "user_prof", quota: "default" }
+_clickhouse_logger:
+  level: trace
+  log: "{{ dirs.clickhouse_log }}/clickhouse-server.log"
+  errorlog: "{{ dirs.clickhouse_log }}/clickhouse-server.err.log"
+  size: 50M
+  count: 7
 ch_db: stats
-chp_dsn: "http://{{main_user}}:{{main_user_password}}@host:{{ports.chproxy.0}}/{{ch_db}}"
-chs_dsn: "http://{{main_user}}@host:{{ports.clickhouse.0}}/{{ch_db}}"
+# ########## CH PROXY ##########
+_chproxy_defs:
+  max_concurrent_queries: 3
+  allow_cors: yes
+  max_queue_time: 30s
+  max_execution_time: 30s
+  max_queue_size: 100
+  to_cluster: local
+_chproxy_allowed_networks_default: "{{local_nets}}"
+_chproxy_clusters_default:
+  - name: local
+    nodes:
+      - "{{if_inner}}:{{ports.clickhouse.0}}"
+    users:
+      - { name: readonly, password: "" }
+      - { name: default, password: "" }
+_chproxy_users_default:
+  - { to_user: 'readonly', name: 'readonly', password: ''}
+  - { to_user: 'default', name: 'default', password: ''}
+# ########## CH Common ##########
+_chp_dsn: "http://{{main_user}}:{{main_user_password}}@host:{{ports.chproxy.0}}/{{ch_db}}"
+_chs_dsn: "http://{{main_user}}@host:{{ports.clickhouse.0}}/{{ch_db}}"
 # ########## Common Envs ##########
 containers_env:
   # **ATTENTION! You have to configure variables at Director's config too!**
@@ -189,9 +231,9 @@ containers_env:
   JSON_LOGS: 1
   NETWORK: "{{docker_net_name}}"
   REDIS_DSN: "redis://redis:6379"
-  CH_DSN: "{{chp_dsn}}"
-  CHP_DSN: "{{chp_dsn}}"
-  CHS_DSN: "{{chs_dsn}}"
+  CH_DSN: "{{_chp_dsn}}"
+  CHP_DSN: "{{_chp_dsn}}"
+  CHS_DSN: "{{_chs_dsn}}"
 director_env:
   PORT: "{{ports.director.1}}"
   IMAGES_PATH: "/images"
@@ -281,20 +323,7 @@ _nginx_upstreams:
   - 'upstream unetdata { server {{if_inner}}:{{ports.netdata.0}} weight=10; keepalive 8; }'
   - 'upstream utheia { server {{if_inner}}:{{ports.theia.0}} weight=10; keepalive 8; }'
   - 'upstream uhttpdebug { server {{if_inner}}:{{ports.httpdebug.0}} weight=10; }'
-# ########## CH PROXY ##########
-_chproxy_allow_from:
-  - "{{docker_net}}"
-  - "{{s2s_vpn_net}}"
-_chproxy_user_config:
-  - allow_cors: true
-    to_cluster: 'default'
-    to_user: 'default'
-    max_concurrent_queries: 2
-    max_queue_size: 100
-    max_queue_time: 30s
-    max_execution_time: 30s
-# _chproxy_users:
-#   - "{{ {'name': main_user, 'password': main_user_password}|combine(_chproxy_user_config) }}"
+
 # ########## Other things ##########
 hostname: "{{inventory_hostname_short|default(inventory_hostname)}}"
 # ########## Mailer config ##########
