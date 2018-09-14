@@ -44,7 +44,7 @@
       - name: Including Docker role
         include_role:
           name: dr.docker
-        vars:
+        vars: 
           drd_users:
           - "{{support_user}}"
           drd_create_network: yes
@@ -74,9 +74,9 @@
           labels: "{{docker_band_lbls}}"
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
+          restart_policy: "{{_restart_policy}}"
           restart: yes
           pull: yes
-          restart_policy: always
           recreate: yes
           memory: "100m"
           env: "{{ containers_env }}"
@@ -149,24 +149,47 @@
     ##### ##### ##### ##### #####    Lets encrypt - acme.sh    ##### ##### ##### ##### ##### 
 
     - block:
-      - name: Including LetsEncrypt AcmeDNS role
-        include_role:
-          name: dr.letsencrypt.wildcard.auto
-        vars:
-          _r_domain: "{{domain}}"
-          _r_subdomains: "{{subdomains}}"
-          _r_webroot: "{{dirs.well_known}}"
-          _r_force: yes
-          _r_wildcard: "{{_ssl_wildcard}}"
-          _r_check_addr: "{{if_inner}}:{{ports.http.0}}"
-          _r_bind_addr: "{{if_inner}}:{{ports.letsencrypt.0}}"
-          _r_cert_root: "{{dirs.certs}}"
+        ### Migration to new location
+        - find:
+            paths: "{{dirs.certs}}"
+            file_type: any
+          register: new_certs_list
 
-      - shell: nginx -t && nginx -s reload || /bin/true
-        register: _r_nginx_reload
+        - block:
+            - copy:
+                remote_src: yes
+                src: "{{item.0}}"
+                dest: "{{item.1}}"
+              loop:
+                - ["{{oldloc}}/privkey.pem", "{{dirs.certs}}{{_ssl_cert_key}}"]
+                - ["{{oldloc}}/fullchain.pem", "{{dirs.certs}}{{_ssl_cert_fullchain}}"]
+                - ["{{oldloc}}/cert.pem", "{{dirs.certs}}{{_ssl_cert_trust}}"]
+              failed_when: False
 
-      - debug: msg={{_r_nginx_reload}}
+          when: "new_certs_list.examined == 0"
+          
+        - name: Including LetsEncrypt AcmeDNS role
+          include_role:
+            name: dr.letsencrypt.wildcard.auto
+          vars:
+            _r_domain: "{{domain}}"
+            _r_subdomains: "{{subdomains}}"
+            _r_webroot: "{{dirs.well_known}}"
+            _r_force: yes
+            _r_wildcard: "{{_ssl_wildcard}}"
+            _r_docker_networks: [ { name: "{{docker_net_name}}" } ]
+            _r_docker_labels: "{{docker_band_lbls}}"
+            _r_check_addr: "{{if_inner}}:{{ports.http.0}}"
+            _r_bind_addr: "{{if_inner}}:{{ports.letsencrypt.0}}"
+            _r_cert_root: "{{dirs.certs}}"
 
+        - shell: nginx -t && nginx -s reload || /bin/true
+          register: _r_nginx_reload
+
+        - debug: msg={{_r_nginx_reload}}
+
+      vars:
+        oldloc: "/etc/letsencrypt/live/{{domain}}"
       when: "_setup_ssl == True"
       tags: ['never', 'ssl']
 
@@ -257,6 +280,7 @@
           labels: "{{docker_band_lbls}}"
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
+          restart_policy: "{{_restart_policy}}"
           restart: yes
           pull: yes
           recreate: yes
@@ -285,6 +309,7 @@
           labels: "{{docker_band_lbls}}"
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
+          restart_policy: "{{_restart_policy}}"
           restart: yes
           pull: yes
           recreate: yes
@@ -316,7 +341,8 @@
           ports: [ "{{if_inner}}:{{ports.director.0}}:{{ports.director.1}}" ]
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
-          env: "{{ director_env|combine(containers_env, director_env_extra|default({})) }}"
+          env: "{{ _director_env|combine(containers_env, director_env_extra|default({})) }}"
+          restart_policy: "{{_restart_policy}}"
           pull: yes
           restart: yes
           recreate: yes
@@ -346,6 +372,7 @@
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
           env: "{{env|combine(containers_env, front_env_extra|default({}) )}}"
+          restart_policy: "{{_restart_policy}}"
           pull: yes
           restart: yes
           recreate: yes
@@ -380,6 +407,7 @@
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
           env: "{{env|combine(containers_env)}}"
+          restart_policy: "{{_restart_policy}}"
           pull: yes
           restart: yes
           recreate: yes
@@ -404,6 +432,7 @@
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
           env: "{{env|combine(containers_env)}}"
+          restart_policy: "{{_restart_policy}}"
           pull: yes
           restart: yes
           memory: "100m"
@@ -427,6 +456,7 @@
           labels: "{{docker_band_lbls}}"
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
+          restart_policy: "{{_restart_policy}}"
           restart: yes
           pull: yes
           recreate: yes
@@ -465,8 +495,9 @@
           labels: "{{docker_band_lbls}}"
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
-          restart: yes
+          restart_policy: "{{_restart_policy}}"
           pull: yes
+          restart: yes
           recreate: yes
           memory: "300m"
           ports:
@@ -493,7 +524,8 @@
           ports: [ "{{if_inner}}:{{ports.theia.0}}:{{ports.theia.1}}" ]
           networks: [ { name: "{{docker_net_name}}" } ]
           etc_hosts: "{{etc_hosts}}"
-          env: "{{containers_env}}"
+          env: "{{ {}|combine(containers_env, _theia_env) }}"
+          restart_policy: "{{_restart_policy}}"
           pull: yes
           restart: yes
           recreate: yes
